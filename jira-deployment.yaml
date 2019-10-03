@@ -1,29 +1,95 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jira-config
+  namespace: default
+  labels:
+    app: jira
+data:
+  JVM_MINIMUM_MEMORY: "2048m"
+  JVM_MAXIMUM_MEMORY: "4096m"
+---
+# persistent volume for jira software
+kind: PersistentVolume
+apiVersion: v1
+metadata:
+  name: jira-pv-volume
+  namespace: default
+  labels:
+    type: local
+    app: jira
+spec:
+  storageClassName: gp2
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/mnt/kube-data/jira"
+---
+# persistent volume claim for jira software
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: jira-pv-claim
+  namespace: default
+  labels:
+    app: jira
+spec:
+  storageClassName: gp2
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
 apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
-  labels:
-    app: jira
   name: jira
+  namespace: default
 spec:
   replicas: 1
   template:
     metadata:
       labels:
         app: jira
-      name: jira
     spec:
       containers:
         - name: jira
-          image: "gcr.io/hightowerlabs/jira:7.3.6-standalone"
-          resources:
-            requests:
-              cpu: "2"
-              memory: "2G"
+          image: cptactionhank/atlassian-jira-software:latest
+          imagePullPolicy: "IfNotPresent"
+          ports:
+            - containerPort: 8080
+              name: port-jira
+          envFrom:
+            - configMapRef:
+                name: jira-config
           volumeMounts:
-            - name: "jira-home"
-              mountPath: /opt/jira-home
+          - mountPath: "/var/lib/atlassian/jira/data"
+            name: jira-vol
       volumes:
-        - name: "jira-home"
-          gcePersistentDisk:
-            pdName: jira-home
-            fsType: ext4
+      - name: jira-vol
+        persistentVolumeClaim:
+          claimName: jira-pv-claim
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: jira-service-lb
+  namespace: default
+  labels:
+    app: jira
+    function: loadbalancer
+spec:
+  type: LoadBalancer
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+  selector:
+    app: jira
+  loadBalancerSourceRanges:
+  - 0.0.0.0/32
